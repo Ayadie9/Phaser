@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>TD1</title>
+    <script src="//cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.js"></script>
+    <style type="text/css">
+        /* Style pour supprimer les marges du corps de la page */
+        body {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        // Configuration du jeu
+        var config = {
+            type: Phaser.AUTO, // Détermine le type de rendu, auto-detecté par Phaser
+            scale: {
+                width: 800, // Largeur de la zone de jeu
+                height: 600, // Hauteur de la zone de jeu
+            },
+            scene: {
+                preload: preload, // Fonction pour précharger les ressources avant le début du jeu
+                create: create, // Fonction pour créer le contenu et initialiser le jeu
+                update: update // Fonction pour mettre à jour la logique du jeu à chaque frame
+            },
+            physics: {
+                default: 'arcade', // Utilisation du moteur physique arcade
+                arcade: {
+                    gravity: { y: 300 }, // Gravité appliquée sur l'axe Y (vers le bas)
+                    debug: false // Affichage du mode débogage (false pour ne pas afficher les collisions)
+                }
+            }
+        };
+
+        // Création d'une nouvelle instance de Phaser.Game avec la configuration spécifiée
+        var game = new Phaser.Game(config);
+
+        // Fonction pour précharger les ressources nécessaires au jeu
+        function preload() {
+            // Chargement des images et des sprites nécessaires
+            this.load.image('sky', 'assets/sky2.png'); 
+            this.load.image('ground', 'assets/platform.png'); 
+            this.load.image('star', 'assets/star.png'); 
+            this.load.image('bomb', 'assets/bomb.png'); 
+            this.load.spritesheet('dude', 'assets/dude.png', { frameWidth: 32, frameHeight: 48 }); 
+            this.load.spritesheet('fullscreen', 'assets/fullscreen.png', { frameWidth: 64, frameHeight: 64 }); 
+            this.load.audio('criMort', 'assets/criMort.mp3'); 
+            this.load.audio('ding', 'assets/ding.mp3'); 
+        }
+
+        // Déclaration des variables globales pour les groupes d'objets et les sons
+        var platforms, player, stars, bombs; // Variables pour les groupes de plateformes, joueur, étoiles et bombes
+        var textScore, score = 0, vitesseBombe = 480; // Variables pour le score et la vitesse des bombes
+        var criMort, ding; 
+
+        // Fonction pour créer les éléments du jeu
+        function create() {
+            // Ajout de l'image de fond pour le ciel
+            this.add.image(400, 300, 'sky');
+
+            // Création des plateformes où le joueur peut sauter
+            platforms = this.physics.add.staticGroup(); // Création d'un groupe de plateformes statiques
+            platforms.create(400, 568, 'ground').setScale(2).refreshBody(); // Création de la plateforme du bas, agrandie pour occuper l'écran
+            platforms.create(600, 400, 'ground'); // Création d'une plateforme intermédiaire
+            platforms.create(50, 250, 'ground'); // Création d'une plateforme à gauche
+            platforms.create(750, 220, 'ground'); // Création d'une plateforme à droite
+
+            // Création du joueur
+            player = this.physics.add.sprite(100, 450, 'dude'); // Sprite du joueur positionné à x=100, y=450
+            player.setBounce(0.2); // Applique un rebond léger au joueur
+            player.setCollideWorldBounds(true); // Empêche le joueur de sortir de la zone de jeu
+            player.body.setGravityY(300); // Applique une gravité vers le bas au joueur
+
+            // Création des animations du joueur
+            this.anims.create({
+                key: 'left', // Nom de l'animation pour se déplacer à gauche
+                frames: this.anims.generateFrameNumbers('dude', { start: 0, end: 3 }), // Cadres d'animation pour se déplacer à gauche
+                frameRate: 10, // Vitesse de l'animation
+                repeat: -1 // L'animation se répète indéfiniment
+            });
+            this.anims.create({
+                key: 'right', // Nom de l'animation pour se déplacer à droite
+                frames: this.anims.generateFrameNumbers('dude', { start: 5, end: 8 }), // Cadres d'animation pour se déplacer à droite
+                frameRate: 10,
+                repeat: -1
+            });
+            this.anims.create({
+                key: 'turn', // Nom de l'animation pour le joueur immobile
+                frames: [{ key: 'dude', frame: 4 }], // Cadre d'animation pour rester immobile
+                frameRate: 10
+            });
+
+            // Ajout de collisions entre le joueur et les plateformes
+            this.physics.add.collider(player, platforms);
+
+            // Affichage du score à l'écran
+            textScore = this.add.text(20, 20, 'Score : 0', { fontSize: '20px', color: '#000', stroke: '#000', strokeThickness: 1 });
+
+            // Création des étoiles que le joueur peut collecter
+            stars = this.physics.add.group({
+                key: 'star', // Clé pour le groupe d'étoiles
+                repeat: 11, // Nombre d'étoiles à créer (11 étoiles au total)
+                setXY: { x: 12, y: 0, stepX: 70 } // Positionnement des étoiles avec un écart de 70 pixels
+            });
+            // Application de propriétés aux étoiles
+            stars.children.iterate(function (child) {
+                child.setBounceY(Phaser.Math.FloatBetween(0.4, 0.8)); // Donne un rebond aléatoire à chaque étoile
+                child.setCollideWorldBounds(true); // Empêche les étoiles de sortir de la zone de jeu
+            });
+            // Ajout de collisions entre les étoiles et les plateformes
+            this.physics.add.collider(stars, platforms);
+
+            // Gestion de la collecte des étoiles par le joueur
+            this.physics.add.overlap(player, stars, collectStar, null, this);
+
+            // Création des bombes
+            bombs = this.physics.add.group({
+                key: 'bomb', // Clé pour le groupe de bombes
+                setXY: { x: 12, y: 0 } // Position initiale des bombes
+            });
+            // Application de propriétés aux bombes
+            bombs.children.iterate(function (child) {
+                child.setCollideWorldBounds(true); // Empêche les bombes de sortir de la zone de jeu
+                child.allowGravity = false; // Les bombes ne sont pas affectées par la gravité
+                child.setVelocityX(vitesseBombe); // Applique une vitesse initiale à la bombe
+                child.setBounce(1); // Les bombes rebondissent
+            });
+            // Ajout de collisions entre les bombes et les plateformes
+            this.physics.add.collider(bombs, platforms);
+
+            // Gestion des collisions entre le joueur et les bombes
+            this.physics.add.overlap(player, bombs, hitBomb, null, this);
+
+            // Chargement des sons pour le jeu
+            criMort = this.sound.add('criMort'); // Son à jouer lorsque le joueur meurt
+            ding = this.sound.add('ding'); // Son à jouer lorsque le joueur collecte une étoile
+
+            // Création du bouton plein écran
+            var fullScreen = this.add.sprite(750, 50, 'fullscreen', 0).setInteractive(); // Sprite pour le bouton plein écran
+            fullScreen.on('pointerup', function () { // Événement qui se déclenche au clic sur le bouton
+                if (!this.scale.isFullScreen) { // Vérifie si le jeu est déjà en plein écran
+                    fullScreen.setFrame(1); // Change le cadre pour représenter l'état plein écran
+                    this.scale.startFullscreen(); // Active le mode plein écran
+                } else {
+                    fullScreen.setFrame(0); // Change le cadre pour représenter l'état normal
+                    this.scale.stopFullscreen(); // Quitte le mode plein écran
+                }
+            }, this);
+        }
+
+        // Fonction pour gérer la collecte d'une étoile
+        function collectStar(player, star) {
+            star.disableBody(true, true); // Désactive l'étoile collectée (la rend invisible)
+            score += 1; // Augmente le score de 1
+            textScore.setText("Score : " + score); // Met à jour l'affichage du score
+            ding.play(); // Joue le son de collecte d'étoile
+
+            // Vérifie si toutes les étoiles ont été collectées
+            if (stars.countActive(true) === 0) {
+                // Réactive toutes les étoiles à collecter
+                stars.children.iterate(function (child) {
+                    child.enableBody(true, child.x, 0, true, true); // Réactive chaque étoile
+                });
+
+                // Création d'une nouvelle bombe
+                var x = (player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400); // Position de la nouvelle bombe
+                var bomb = bombs.create(x, 16, 'bomb'); // Création de la bombe
+                bomb.setBounce(1); // Permet à la bombe de rebondir
+                bomb.setVelocity(Phaser.Math.Between(-200, 200), 20); // Applique une vitesse aléatoire à la bombe
+            }
+        }
+
+        // Fonction pour gérer la collision du joueur avec une bombe
+        function hitBomb(player, bomb) {
+            this.physics.pause(); // Met en pause la physique du jeu
+            player.setTint(0xff0000); // Change la couleur du joueur pour indiquer qu'il est touché
+            criMort.play(); // Joue le son de mort
+            player.anims.play('turn'); // Joue l'animation d'immobilisation du joueur
+            // Ajoute un délai de 2 secondes avant de recharger la page
+            setTimeout(function () {
+                location.reload(); // Recharge la page pour recommencer le jeu
+            }, 2000);
+        }
+
+        // Fonction pour mettre à jour la logique du jeu à chaque frame
+        function update() {
+            // Récupère les touches fléchées gauche et droite
+            const cursors = this.input.keyboard.createCursorKeys(); 
+
+            // Vérifie si la touche fléchée gauche est pressée
+            if (cursors.left.isDown) {
+                player.setVelocityX(-160); // Déplace le joueur vers la gauche
+                player.anims.play('left', true); // Joue l'animation de déplacement à gauche
+            }
+            // Vérifie si la touche fléchée droite est pressée
+            else if (cursors.right.isDown) {
+                player.setVelocityX(160); // Déplace le joueur vers la droite
+                player.anims.play('right', true); // Joue l'animation de déplacement à droite
+            } else {
+                player.setVelocityX(0); // Arrête le joueur
+                player.anims.play('turn'); // Joue l'animation d'immobilisation
+            }
+
+            // Vérifie si la touche fléchée haut est pressée pour faire sauter le joueur
+            if (cursors.up.isDown && player.body.touching.down) {
+                player.setVelocityY(-330); // Applique une force vers le haut pour sauter
+            }
+        }
+    </script>
+</body>
+</html>
