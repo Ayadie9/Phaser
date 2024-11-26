@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TD2</title>
+    <!-- Inclusion de la bibliothèque Phaser depuis un CDN -->
+    <script src="//cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.js"></script>
+</head>
+<body>
+    <script>
+        // Configuration initiale du jeu
+        var config = { 
+            type: Phaser.AUTO,  // Choisit automatiquement WebGL ou Canvas selon le support
+            width: 1024,        // Largeur de la scène
+            height: 576,        // Hauteur de la scène
+            scene: {
+                preload: preload,  // Fonction de chargement des ressources
+                create: create,    // Fonction de création des objets du jeu
+                update: update     // Fonction appelée à chaque frame pour mettre à jour le jeu
+            },
+            physics: {
+                default: 'arcade',  // Moteur physique simple "Arcade"
+                arcade: {
+                    gravity: { y: 300 },  // Gravité vers le bas avec une force de 300
+                    debug: false          // Affichage du débogage désactivé
+                }
+            }
+        };
+
+        // Création d'un nouvel objet jeu avec la configuration définie
+        var game = new Phaser.Game(config);
+
+        // Fonction de préchargement des ressources
+        function preload() {
+            // Chargement des images et sprites utilisés dans le jeu
+            this.load.image('ground_1x1', 'assets/ground_1x1.png');   // Sol
+            this.load.image('pic', 'assets/spike.png');               // Pics dangereux
+            this.load.spritesheet('coin', 'assets/coin.png', { frameWidth: 32, frameHeight: 32 });  // Pièces
+            this.load.spritesheet('dude', 'assets/dude.png', { frameWidth: 32, frameHeight: 48 }); // Joueur
+            this.load.tilemapTiledJSON('map', 'assets/tile-collision-test.json');  // Carte du jeu (fichier JSON)
+        }
+
+        // Déclaration des variables globales pour le score et le texte associé
+        var textScore;
+        var score;
+
+        // Fonction appelée une fois que les ressources sont chargées, pour créer les objets du jeu
+        function create() {
+            // Création de la carte à partir du fichier JSON
+            map = this.make.tilemap({ key: 'map' });
+            var groundTiles = map.addTilesetImage('ground_1x1');  // Sol
+            var coinTiles = map.addTilesetImage('coin');          // Pièces
+            var picsTiles = map.addTilesetImage('pic');           // Pics
+
+            // Ajout des couches (calques) à partir de la carte
+            map.createLayer('Background Layer', groundTiles, 0, 0);  // Fond de la carte
+            groundLayer = map.createLayer('Ground Layer', groundTiles, 0, 0);  // Couche du sol
+            coinLayer = map.createLayer('Coin Layer', coinTiles, 0, 0);        // Couche des pièces
+            picLayer = map.createLayer('Pics Layer', picsTiles, 0, 0);         // Couche des pics
+
+            // Création et configuration du joueur
+            player = this.physics.add.sprite(100, 450, 'dude');  // Position initiale (100, 450)
+            player.setBounce(0.2);                             // Rebondit légèrement quand il touche le sol
+            player.setCollideWorldBounds(true);                // Ne peut pas sortir des limites de la scène
+            player.body.setGravityY(300);                      // Gravité supplémentaire pour un saut réaliste
+
+            // Animation pour le déplacement du joueur à gauche
+            this.anims.create({
+                key: 'left', 
+                frames: this.anims.generateFrameNumbers('dude', { start: 0, end: 3 }),  // Images de l'animation
+                frameRate: 10,  // Vitesse de l'animation
+                repeat: -1      // Répétition infinie
+            });
+
+            // Animation pour le déplacement du joueur à droite
+            this.anims.create({
+                key: 'right', 
+                frames: this.anims.generateFrameNumbers('dude', { start: 5, end: 8 }), 
+                frameRate: 10,
+                repeat: -1
+            });
+
+            // Animation pour le joueur immobile
+            this.anims.create({
+                key: 'turn', 
+                frames: [{ key: 'dude', frame: 4 }],  // Image d'arrêt
+                frameRate: 10
+            });
+
+            // Création de la barre de vie en haut de l'écran
+            barreVie = this.add.rectangle(95, 15, 175, 15, 0xff0000);  // Rectangle rouge pour représenter la vie
+            barreVie.setStrokeStyle(5, 0x000000);  // Bordure noire
+            barreVie.setScrollFactor(0);  // La barre reste fixe à l'écran même si la caméra bouge
+
+            // Gestion des collisions entre le joueur et le sol
+            this.physics.add.collider(player, groundLayer);
+
+            // Définition des tuiles du sol sur lesquelles les collisions sont actives (de 1 à 25)
+            groundLayer.setCollisionBetween(1, 25);
+
+            // Configuration de la caméra pour suivre le joueur
+            this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);  // Limites de la caméra
+            this.cameras.main.startFollow(player);  // La caméra suit le joueur
+
+            // Gestion des collisions entre le joueur et les pièces ou les pics
+            this.physics.add.overlap(player, coinLayer);  // Chevauchement avec les pièces
+            this.physics.add.overlap(player, picLayer);   // Chevauchement avec les pics
+
+            // Initialisation du score
+            var score = 0;
+
+            // Fonction appelée lorsqu'une pièce est touchée
+            function hitCoin(sprite, tile) {
+                coinLayer.removeTileAt(tile.x, tile.y);  // Suppression de la pièce
+
+                // Mise à jour du score
+                score += 1;
+                textScore.setText("Pièces récupérées : " + score);  // Affichage du score mis à jour
+
+                // Si toutes les pièces sont récupérées, on crée une "porte" en supprimant des tuiles du sol
+                if (score == 28) {
+                    groundLayer.removeTileAt(49, 15);  // Suppression de la tuile pour ouvrir le passage
+                    groundLayer.removeTileAt(49, 16);
+                }
+            }
+
+            // Fonction appelée lorsqu'un pic est touché
+            function hitPic(sprite, tile) {
+                // Réduction de la barre de vie
+                if (barreVie.width > 0) {
+                    barreVie.setSize(barreVie.width - 2, 15);  // Réduction de la largeur de la barre de vie
+                    barreVie.x -= 1;  // Ajustement de la position pour centrer la barre
+                } else {
+                    // Affichage du message "PERDU" en cas de vie épuisée
+                    textPerdu = this.add.text(400, -5, 'PERDU !!', { fontSize: '40px', color: '#f00', stroke: '#000', strokeThickness: 1, visible: true });
+                    textPerdu.setScrollFactor(0);  // Le texte reste fixe à l'écran
+                    this.physics.pause();          // Pause de la physique (arrête le jeu)
+                    player.setTint(0xff0000);      // Le joueur devient rouge
+                    player.anims.play('turn');     // Animation d'arrêt du joueur
+                    gameOver = true;               // Définition de l'état de fin du jeu
+                }
+            }
+
+            // Assignation des callbacks (fonctions) pour les collisions avec les pièces et les pics
+            coinLayer.setTileIndexCallback(26, hitCoin, this);  // Détection de la pièce (index 26)
+            picLayer.setTileIndexCallback(32, hitPic, this);    // Détection des pics (index 32)
+
+            // Ajout du texte pour afficher le score en haut de l'écran
+            score = 0;
+            textScore = this.add.text(750, 5, 'Pièces récupérées : 0', { fontSize: '20px', color: '#fff', stroke: '#000', strokeThickness: 3, visible: true });
+            textScore.setScrollFactor(0);  // Le score reste visible malgré les déplacements
+        }
+        
+        // Fonction appelée à chaque frame pour mettre à jour l'état du jeu
+        function update() {
+            const cursors = this.input.keyboard.createCursorKeys();  // Récupération des touches directionnelles
+
+            // Déplacement vers la gauche
+            if (cursors.left.isDown) {
+                player.setVelocityX(-160);  // Vitesse du joueur vers la gauche
+                player.anims.play('left', true);  // Animation de déplacement à gauche
+            }
+            // Déplacement vers la droite
+            else if (cursors.right.isDown) {                player.setVelocityX(160);  // Vitesse du joueur vers la droite
+                player.anims.play('right', true);  // Animation de déplacement à droite
+            } else {
+                player.setVelocityX(0);  // Aucune vitesse si aucune touche n'est enfoncée
+                player.anims.play('turn');  // Animation d'arrêt du joueur
+            }
+
+            // Gestion du saut du joueur
+            if (cursors.up.isDown && player.body.blocked.down) { 
+                player.setVelocityY(-330);  // Force du saut (négatif pour aller vers le haut)
+            }
+        }
+    </script>
+</body>
+</html>
+
